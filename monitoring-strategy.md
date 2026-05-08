@@ -183,8 +183,6 @@ Actions:
 - check broker disk/network saturation
 - isolate high-volume tenant traffic if this repeats
 
----
-
 ### Alert 3: Postgres capacity risk
 
 Trigger: 
