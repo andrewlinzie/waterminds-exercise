@@ -2,409 +2,244 @@
 
 ## Overview
 
-The main monitoring problem is that WaterMinds is operating a shared multi-tenant platform without enough tenant-level visibility.
+The core monitoring gap is tenant-level visibility.
 
-Basic CloudWatch metrics may show that the platform is healthy or unhealthy overall, but they do not answer the most important scaling questions:
+Basic CloudWatch metrics can show if the platform is healthy overall, but they do not clearly show:
 
-- Which customers are consuming the most resources?
-- Which shared systems are approaching capacity?
-- Where are bottlenecks forming?
-- Is one customer creating noisy-neighbor risk for others?
+- which customers are using the most resources
+- which systems are getting close to capacity
+- whether one customer is creating noisy neighbor risk
+- where the next bottleneck could form
 
-The monitoring strategy should make the platform visible at three levels:
-
-1. Platform health: Is AWS/EKS/Kafka/Postgres/Snowflake healthy?
-2. Service health: Are APIs, ingestion jobs, and customer-facing workflows meeting reliability targets?
-3. Tenant health: Which customers are driving usage, cost, latency, or risk?
-
-The goal is not just dashboards. The goal is proactive capacity planning.
+My approach would be to move from general platform monitoring to customer-aware monitoring. Since this is a multi-tenant platform, I would want the major signals tied back to customer, customer tier, service, or workload.
 
 ---
 
-## 1. Key Metrics to Predict Scaling Needs
-
-## Metric 1: API request rate and p95 latency by customer
-
-### What to monitor
-
-- API request count by `customer_id` or customer tier.
-- API p95 latency by route.
-- API error rate by route and customer.
-- Top customers by request volume.
-
-### Thresholds
-
-- p95 latency above 500ms for common read endpoints for 10+ minutes.
-- 5xx error rate above 2% for 5+ minutes.
-- One customer generating more than 25-30% of total API traffic.
-- HPA at max replicas while latency is still increasing.
-
-### Why this metric matters
-
-The API is the user-facing layer. Customers feel API slowness directly through dashboards, reports, and application workflows. API metrics are also useful because they often reveal downstream problems in Postgres, Snowflake, Kafka, or internal services.
-
----
-
-## Metric 2: Postgres connection usage and query latency by schema
-
-### What to monitor
-
-- Active connections as a percentage of max connections.
-- Connections by service.
-- Query count by schema.
-- Slow queries by schema.
-- p95 query latency for core application queries.
-- Database CPU, memory, IOPS, and lock waits.
-
-### Thresholds
-
-- Active connections above 70% of max connections for 10+ minutes.
-- Active connections above 85% should trigger urgent action.
-- p95 query latency above 250-500ms for core queries.
-- One schema/customer responsible for more than 25-30% of query load.
-- Increasing lock waits or long-running transactions.
-
-### Why this metric matters
-
-With schema-per-customer, the system may not break because of the number of schemas alone. It is more likely to break because of too many connections, slow queries, or one tenant creating heavy load. Postgres is also a likely bottleneck because many API paths depend on it.
-
----
-
-## Metric 3: Kafka message volume and consumer lag by customer/topic
-
-### What to monitor
-
-- Messages per second by topic.
-- Bytes in/out by topic.
-- Consumer lag by consumer group.
-- Message volume by customer/facility when available.
-- Broker disk usage, CPU, memory, and network throughput.
-- Failed or delayed message processing.
-
-### Thresholds
-
-- Consumer lag grows for 15-30 minutes without recovering.
-- Broker disk usage above 70%.
-- Broker CPU or network above 70% sustained.
-- One customer generating more than 25-30% of total telemetry volume.
-- Ingestion-to-availability latency exceeds the data freshness target.
-
-### Why this metric matters
-
-Kafka is the live telemetry ingestion layer. If Kafka falls behind, customers may see stale or delayed facility data even if the API and UI are still up.
-
----
-
-## Metric 4: Snowflake warehouse utilization, queueing, and cost by workload/customer
-
-### What to monitor
-
-- Warehouse queue time.
-- Query duration.
-- Bytes scanned per query.
-- Credits consumed by warehouse.
-- Query tags by customer, workload, and service.
-- Data freshness for Bronze/Silver/Gold pipelines.
-
-### Thresholds
-
-- Warehouse queue time above 1-2 minutes.
-- Data freshness SLO missed for ingestion or transformation jobs.
-- One customer/workload driving more than 25-30% of warehouse credits.
-- Repeated customer-scoped queries scanning far more data than expected.
-- BI/reporting workloads slowing API-serving or transformation workloads.
-
-### Why this metric matters
-
-Snowflake may not fail in the same way as Postgres, but cost, queueing, and freshness can degrade as usage grows. Separating compute by workload only works if warehouse usage is visible.
-
----
-
-## Metric 5: EKS pod, node, and autoscaling saturation
-
-### What to monitor
-
-- Pod CPU and memory by service.
-- Node CPU and memory.
-- Pending pods.
-- Pod restarts and OOM kills.
-- HPA current vs desired replicas.
-- HPA max replicas reached.
-- Cluster autoscaler/Karpenter scaling events.
-- Service availability and readiness.
-
-### Thresholds
-
-- Pods above 70% CPU or memory for 10+ minutes.
-- Nodes above 75% CPU or memory sustained.
-- HPA at max replicas for 10+ minutes.
-- Pending pods due to insufficient CPU or memory.
-- OOM kills or restart loops increasing.
-- Available replicas below desired replicas.
-
-### Why this metric matters
-
-EKS is the shared runtime for the application layer. HPA can add pods, but only if the cluster has room to schedule them. Node and pod saturation show whether the platform can absorb more customer traffic.
+| Metric | Threshold/Trigger | Why it Matters |
+|---|---|---|
+|API request rate, p95 latency, and error rate by customer | p95 latency > 500ms for 10 minutes, 5xx error rate > 2% for 5 minutes, or one customer > 25-30% of traffic | The API is closest to customer experience and often exposes downstream issues first. | 
+| Postgres connections and query latency by schema | Connections > 70% for 10+ minutes, >85% urgent, p95 query latency > 250-500ms, or one schema > 25-30% of query load | With schema-per-customer, connections, slow queries, and tenant skew are more likely to break than the raw number of schemas. |
+| Kafka message volume and consumer lag by topic/customer | Lag grows for 15-30 minutes, broker disk > 70%, broker CPU/network > 70%, or one customer > 25-30% of telemetry volume | Kafka is the live telemetry path. If it falls behind, customers may see stale facility data. |
+| Snowflake warehouse queueing, credits, and query tags | Queue time > 1-2 minutes, one workload/customer > 25-30% of credits, or freshness targets are missed | Snowflake scaling issues may show up as cost, queueing, or stale data instead of a hard outage. |
+| EKS pod, node, and HPA saturation | Pods > 70% CPU/memory, nodes > 75%, HPA maxed for 10+ minutes, pending pods, OOM kills, or rising restarts | HPA only helps if the cluster has room. Pod and node saturation show when the runtime is running out of headroom. |
 
 ---
 
 ## 2. Per-Customer Visibility
 
-The most important monitoring improvement is adding customer-level attribution across shared systems.
+The biggest improvement I'd prioritize is customer-level attribution.
 
-Every request, message, job, and query should be attributable to a customer or customer tier where practical.
+In a shared platform, I'd want to know which customer, customer tier, service, or workload is causing the pressure.
 
-## APIs
+### APIs
 
 Track:
 
-- request count by customer
-- error rate by customer
-- latency by customer and route
-- rate-limit events by customer
+- request count by customer or tier
+- latency by route and customer/tier
+- error rate by route and customer/tier
+- rate-limit events
 - top customers by traffic volume
 
-Implementation notes:
+I'd use safe labels like `customer_id_has`, `customer_tier`, `route`, `method`, and `status_code`.
 
-- Add safe labels such as `customer_id_hash`, `customer_tier`, `route`, `status_code`, and `method`.
-- Avoid labels with high-cardinality or sensitive data such as raw user IDs, request IDs, device IDs, or request bodies.
-- Use logs for detailed investigation and metrics for aggregate trends.
+I'd avoid sensitive labels like raw user IDs, device IDs, request IDs, or request bodies.
 
-## Postgres
+### Postgres
 
 Track:
 
-- connections by application/service
 - query count by schema
 - slow queries by schema
-- table size by schema
-- index bloat or missing indexes for large schemas
+- table growth by schema
+- connections by service
 - long-running transactions
 
-Implementation notes:
+Schema-level visibility is important since the current model is schema-per-customer.
 
-- Use schema naming conventions that map clearly to customer IDs.
-- Use Postgres exporter plus query analysis tools.
-- Use application logs/query tags where direct schema attribution is not available from default metrics.
-
-## Kafka
+### Kafka
 
 Track:
 
-- messages per customer
-- bytes ingested per customer
-- consumer lag by topic/consumer group
-- failed message counts by customer if available
-- top customers by telemetry volume
+- message by topic/customer/facility
+- bytes ingested by topic/consumer
+- consumer lag by topic and consumer group
+- failed message counts
+- top telemetry producers
 
-Implementation notes:
-
-- Include customer/facility context in message metadata where possible.
-- Use topic/partition strategy that avoids hot partitions.
-- Avoid per-device metric labels if device count is high.
-
-## Snowflake
+### Snowflake
 
 Track:
 
 - credits by warehouse
-- query cost by workload/customer using query tags
-- data scanned by query
-- queueing by warehouse
-- data freshness by pipeline stage
+- query tags by customer/workload/service
+- bytes scanned
+- queue time
+- query duration
+- freshness by Bronze/Silver/Gold stage
 
-Implementation notes:
-
-- Use query tags to attribute usage to customer, workload, service, and environment.
-- Separate warehouses by workload so cost and performance problems are easier to isolate.
-- Build a cost/capacity dashboard showing top customers and top workloads.
-
-## Cost Allocation
-
-Track shared cost by:
-
-- customer traffic volume
-- telemetry message volume
-- Snowflake credits/query tags
-- storage growth by customer
-- API usage by customer tier
-- dedicated infrastructure usage where applicable
-
-The goal is not perfect billing precision at first. The goal is enough attribution to identify the largest cost drivers and noisy tenants.
+The goal here is to have enough visibility to identify noisy tenants and major cost drivers.
 
 ---
 
 ## 3. Tooling
 
-## CloudWatch
+I'd use a layered approach.
 
-Use CloudWatch for AWS-native metrics, logs, and alarms.
+### CloudWatch
 
-Good uses:
+I'd use CloudWatch for AWS-native infrastructure visibility:
 
-- EKS node metrics
+- EKS/node metrics
 - RDS/Postgres infrastructure metrics
 - EC2 host metrics if applicable
 - CloudWatch Logs
 - AWS alarms
-- basic infrastructure health
 
-## Prometheus
+### Prometheus
 
-Use Prometheus for Kubernetes and application metrics.
-
-Good uses:
+I'd use Prometheus for Kubernetes and application metrics:
 
 - pod CPU/memory
 - pod restarts
 - HPA behavior
-- service request rate
-- service latency
-- service error rate
+- request rate
+- latency
+- error rate
 - Kafka exporter metrics
 - Postgres exporter metrics
 
-## Grafana
+### Grafana
 
-Use Grafana for dashboards across CloudWatch, Prometheus, and custom metrics.
+I'd use Grafana for dashboards across CloudWatch, Prometheus, and custom metrics.
 
-Dashboards I would build first:
+Dashboards I'd create first:
 
-1. Executive/platform health dashboard
-2. API health and latency dashboard
-3. Tenant usage dashboard
-4. Postgres capacity dashboard
-5. Kafka ingestion dashboard
-6. Snowflake warehouse/cost dashboard
-7. EKS capacity/autoscaling dashboard
+- API health
+- tenant usage
+- Postgres capacity
+- Kafka ingestion
+- Snowflake warehouse/cost
+- EKS capacity/autoscaling
 
-## What I would instrument first
+First instrumentation priority:
 
-Priority order:
-
-1. API request rate, latency, and errors by route/customer.
+1. API request rate, latency, and errors by route/customer
 2. Postgres connections, query latency, and schema-level load.
-3. Kafka lag and message volume by topic/customer.
-4. EKS pod/node saturation and HPA behavior.
-5. Snowflake warehouse queueing, query tags, and credit usage.
-
-Reasoning:
-
-The API is closest to user experience. Postgres and Kafka are likely early bottlenecks. EKS shows runtime capacity. Snowflake shows cost, analytics pressure, and data freshness.
+3. Kafka lag and message volume by topic/customer
+4. EKS pod/node saturation and HPA behavior
+5. Snowflake queueing, query tags, and credit usage
 
 ---
 
 ## 4. Alerting Strategy
 
-Alerts should be actionable and tied to customer impact or scaling risk. I would avoid paging on raw CPU alone unless it is paired with saturation, latency, errors, or failed scaling.
+Alerts should be actionable. I'd avoid alerting on raw CPU alone unless it is tied to saturation, latency, errors, or failed scaling.
 
-## Alert 1: API degradation
+### Alert 1: API Degradation
 
-### Trigger
+Trigger:
 
-- API p95 latency above 500ms for 10 minutes, or
-- 5xx error rate above 2% for 5 minutes, or
-- HPA at max replicas while latency continues rising.
+- p95 API latency > 500 ms for 10 minutes
+- 5xx error rate > 2% for 5 minutes
+- HPA at max replicas while latency keeps rising
 
-### Who gets paged
+Who gets alerted:
 
-- Platform/on-call engineer first.
-- API service owner if issue appears application-specific.
-- Data/platform owner if downstream Postgres/Snowflake/Kafka is involved.
+- platform/on-call engineer first
+- API owner if application specific
+- data/platform owner if downstream systems are involved
 
-### Action
+Actions:
 
-- Check whether issue follows a deployment.
-- Identify top customer traffic during the window.
-- Check API pods, HPA, and node saturation.
-- Check downstream dependency latency.
-- Scale pods/nodes if capacity is the issue.
-- Apply tenant rate limiting if one customer is driving the incident.
-- Roll back recent deployment if degradation correlates with release.
+- check recent deployments
+- identify top customer traffic during the window
+- check API pods, HPA, and node saturation
+- check downstream Postgres/Snowflake/Kafka latency
+- scale if capacity is the issue
+- rate limit or isolate a tenant if one customer is driving the issue
+- roll back if the issue lines up with a deployment
 
----
+### Alert 2: Kafka Ingestion Backlog
 
-## Alert 2: Kafka ingestion backlog
+Trigger:
 
-### Trigger
+- consumer lag grows for 15-30 minutes without recovery
+- broker disk > 70%
+- ingestion-to-availability latency misses the freshness target
+- one customer spikes above 25-30% of message volume and lag rises
 
-- Consumer lag grows for 15-30 minutes without recovery.
-- Ingestion-to-availability latency exceeds the freshness target.
-- Broker disk usage above 70%.
-- One customer spikes above 25-30% of message volume and lag rises.
+Who gets alerted:
 
-### Who gets paged
+- data platform/on-call engineer
+- platform engineer if broker capacity is involved
 
-- Data platform/on-call engineer.
-- Platform engineer if broker capacity is involved.
-- Customer support/CS only if customer-facing freshness is impacted.
+Actions:
 
-### Action
-
-- Identify topic, consumer group, and customer/facility driving lag.
-- Check consumer health and recent deployments.
-- Scale consumers if processing is the bottleneck.
-- Add partitions if topic throughput is constrained.
-- Check broker disk/network saturation.
-- Consider isolating high-volume tenant traffic if repeated.
+- identify topic, consumer group, and customer/facility causing lag
+- check consumer health and recent changes
+- scale consumers if processing is the bottleneck
+- add partitions if topic throughput is constrained
+- check broker disk/network saturation
+- isolate high-volume tenant traffic if this repeats
 
 ---
 
-## Alert 3: Postgres capacity risk
+### Alert 3: Postgres capacity risk
 
-### Trigger
+Trigger: 
 
-- Active connections above 85% of max connections for 5+ minutes.
-- Active connections above 70% sustained for 30+ minutes.
-- p95 core query latency above 500ms for 10 minutes.
-- One schema/customer drives more than 25-30% of load during degradation.
+- active connections > 85% for 5+ minutes
+- active connections > 70% sustained for 30+ minutes
+- p95 core query latency > 500ms for 10 minutes
+- one schema/customer drives more than 25-30% of load during degradation
 
-### Who gets paged
+Who gets alerted:
 
-- Platform/on-call engineer.
-- Database owner if available.
-- API owner if connection growth is caused by service behavior.
+- plafgorm/on-call engineer
+- database owner if available
+- API owner if connection growth is caused by service behavior
 
-### Action
+Actions:
 
-- Check connection pool usage.
-- Identify top schemas/customers by query load.
-- Kill or investigate long-running queries if safe.
-- Tune connection pool settings.
-- Add indexes or tune queries after incident stabilization.
-- Scale Postgres vertically if pressure is broad.
-- Isolate tenant if repeated noisy-neighbor behavior is proven.
+- check connection pool usage
+- identify top schemas/customers by query load
+- investigate long-running queries
+- tune connection pool settings
+- add indexes or tune queries after stabilizing
+- scale Postgres vertically if pressure is broad
+- isolate tenant if noisy-neighbor behavior repeats
 
 ---
 
-## Capacity Planning Cadence
+## 5. Capacity Planning Cadence
 
-I would review capacity weekly during the scale-up period and monthly once the platform is stable.
+During the scale-up period, I'd review capacity on a weekly cadence.
 
-Weekly review should include:
+The weekly review would include:
 
 - top customers by API traffic
 - top customers by Kafka telemetry volume
-- top schemas by Postgres query/load
+- top schemas by Postgres load
 - Snowflake credits by warehouse/workload/customer
-- EKS HPA and node scaling events
+- EKS scaling events
 - capacity headroom by major system
-- incidents or alerts from the previous week
+- alerts/incidents from the previous week
 
-The key output should be a simple capacity report:
+The output should be a simple capacity report:
 
-- what is near limit
-- what customer or workload is driving it
+- what is close to its limit
+- which customer or workload is driving it
 - what action is recommended
-- when action is needed
+- what action is required
 - whether the fix is vertical scaling, horizontal scaling, throttling, optimization, or tenant isolation
 
 ---
 
 ## Summary
 
-The monitoring strategy should move WaterMinds from platform-level visibility to tenant-aware visibility.
+The monitoring strategy should move WaterMinds from a platform with general visibility to tenant-aware visibility.
 
-Basic infrastructure metrics are not enough for a shared SaaS platform. The team needs to know which customers are driving load, which shared systems are approaching limits, and when user-facing reliability is at risk.
+For a shared SaaS platform, the team will need to know which customers are driving load, which shared systems are approaching limits, and when customer-facing reliability is at risk - basic infrastructure metrics are not enough.
 
-The first monitoring priority is API, Postgres, Kafka, EKS, and Snowflake visibility with customer attribution where practical. Alerts should be based on sustained degradation or capacity risk, not noisy one-off spikes.
+The first monitoring priorities would be API, Postgres, Kafka, EKS, and Snowflake visibility with customer attribution.
