@@ -160,7 +160,7 @@ Communication should include the affected systems, severity, mitigation plan, ta
 
 ## 4. Verification and Rollback
 
-Patching is not done when the deploy finishe. It is down when the fix is verified.
+Patching is not done when the deploy finishes. It is done when the fix is verified.
 
 Verification checklist:
 
