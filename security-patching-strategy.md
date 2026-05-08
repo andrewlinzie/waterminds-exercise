@@ -46,7 +46,7 @@ Process:
 4. Rebuild and rescan the image
 5. Deploy through the normal promotion path
 
-Minor and patch updates can usually be handled through automated PRs. Major version changes should get human review because they are more likely to break the app.
+Minor patch updates can usually be handled through automated PRs. Major version changes should get human review because they are more likely to break the app.
 
 ### EKS/Kubernetes
 
