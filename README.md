@@ -20,5 +20,5 @@ My approach is based on a few practical principles:
 2. Add tenant-level visibility before making major scaling decisions.
 3. Scale vertically first when it reduces complexity, then scale horizontally when workload growth or noisy neighbor risk justifies it.
 4. Monitor for actionable capacity and reliability signals, not just dashboard noise.
-5. Automate routing operations while guarding production risk behind approval gates.
+5. Automate routine operations while guarding production risk behind approval gates.
 6. Treat verification, rollback, and auditability as part of the operating process.
