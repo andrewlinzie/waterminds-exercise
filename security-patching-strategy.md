@@ -54,7 +54,7 @@ For EKS, I'd separate control plane upgrades from worker node patching.
 
 For the control plane, I would upgrade dev first, validate workloads and GitOps sync, then move to staging and production with approval.
 
-Worker nodes, I'd prefer blue/green manages node groups:
+Worker nodes, I'd prefer blue/green managed node groups:
 
 1. Create a new patched node group with the updated AMI/version
 2. Allow workloads to schedule onto the new nodes
