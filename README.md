@@ -6,14 +6,11 @@ The scenario consists of a shared multi-tenant SaaS platform for water and waste
 
 ## Documents
 
-- [Scaling Strategy](./scaling-strategy.md)
-  How I would approach scaling the data/application layers from 10 customers to 100+.
+- [Scaling Strategy](./scaling-strategy.md): How I would approach scaling the data/application layers from 10 customers to 100+.
 
-- [Monitoring Strategy](./monitoring-strategy.md)
-  How I would approach monitoring, tenant-level visibility, capacity planning, tooling, and alerting
+- [Monitoring Strategy](./monitoring-strategy.md): How I would approach monitoring, tenant-level visibility, capacity planning, tooling, and alerting
 
-- [Security Patching Strategy](./security-patching-stategy.md)
-  How I would approach emergency patching across containers, dependencies, EKS, and EC2 based systems.
+- [Security Patching Strategy](./security-patching-stategy.md): How I would approach emergency patching across containers, dependencies, EKS, and EC2 based systems.
 
 ## Guiding Principles
 
