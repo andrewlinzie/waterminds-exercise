@@ -15,6 +15,8 @@ My approach would be to move from general platform monitoring to customer-aware 
 
 ---
 
+## 1. Five Metrics I Would Watch
+
 | Metric | Threshold/Trigger | Why it Matters |
 |---|---|---|
 |API request rate, p95 latency, and error rate by customer | p95 latency > 500ms for 10 minutes, 5xx error rate > 2% for 5 minutes, or one customer > 25-30% of traffic | The API is closest to customer experience and often exposes downstream issues first. | 
