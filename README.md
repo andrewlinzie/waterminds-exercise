@@ -10,7 +10,7 @@ The scenario consists of a shared multi-tenant SaaS platform for water and waste
 
 - [Monitoring Strategy](./monitoring-strategy.md): How I would approach monitoring, tenant-level visibility, capacity planning, tooling, and alerting
 
-- [Security Patching Strategy](./security-patching-stategy.md): How I would approach emergency patching across containers, dependencies, EKS, and EC2 based systems.
+- [Security Patching Strategy](./security-patching-strategy.md): How I would approach emergency patching across containers, dependencies, EKS, and EC2 based systems.
 
 ## Guiding Principles
 
